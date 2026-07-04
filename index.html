@@ -32,7 +32,7 @@
   .cell.today { background: #FAFAFC; }
   .cell .empty { text-align: center; font-size: 12px; opacity: .2; }
   .pill { font-size: 10px; line-height: 1.25; border-radius: 6px; padding: 4px; text-align: left; border: none; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: inherit; color: var(--ink); }
-  .banner { font-size: 13px; padding: 8px 12px; border-radius: 10px; margin-bottom: 16px; background: #FBE9EB; color: #C85C6B; display: none; }
+  .banner { font-size: 13px; padding: 8px 12px; border-radius: 10px; margin-bottom: 16px; background: #EFEDF7; color: #4A4870; display: none; }
   .add-btn { width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 12px; border-radius: 16px; font-size: 14px; font-weight: 500; color: var(--gece); background: var(--card); border: 1.5px dashed #C9CCD6; cursor: pointer; margin-bottom: 24px; font-family: inherit; }
   .form-card { background: var(--card); border-radius: 16px; padding: 16px; margin-bottom: 24px; display: none; }
   .form-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 14px; font-weight: 600; }
@@ -67,6 +67,13 @@
   <div class="week-label" id="week-label"></div>
   <div class="grid-card"><div class="grid" id="grid"></div></div>
   <button class="add-btn" id="show-form">＋ Yeni İlaç Ekle</button>
+  <button class="add-btn" id="show-import" style="margin-top:-16px;">⇩ Toplu İçe Aktar (JSON yapıştır)</button>
+  <div class="form-card" id="import-card">
+    <div class="form-head"><span>Toplu İçe Aktar</span><button id="close-import">✕</button></div>
+    <p class="form-label" style="margin-bottom:8px;">Aşağıya ilaç listesi JSON'unu yapıştır, sonra İçe Aktar'a bas.</p>
+    <textarea id="import-text" rows="6" style="width:100%;padding:10px 12px;border-radius:12px;border:none;outline:none;background:var(--bg);font-family:monospace;font-size:12px;margin-bottom:10px;resize:vertical;"></textarea>
+    <button class="submit" id="import-submit">İçe Aktar</button>
+  </div>
   <div class="form-card" id="form-card">
     <div class="form-head"><span>Yeni İlaç</span><button id="close-form">✕</button></div>
     <input type="text" id="f-name" placeholder="İlaç adı">
@@ -109,20 +116,22 @@ function loadState() {
     const m = localStorage.getItem('ilac_meds');
     if (m === null) { meds = DEFAULT_MEDS; saveMeds(); }
     else meds = JSON.parse(m);
-  } catch (e) { meds = DEFAULT_MEDS; showBanner('Depolama kullanılamıyor: ' + e.message); }
+  } catch (e) { meds = DEFAULT_MEDS; showBanner('Depolama kullanılamıyor: ' + e.message, true); }
   try { logs = JSON.parse(localStorage.getItem('ilac_logs') || '{}'); } catch (e) { logs = {}; }
 }
 function saveMeds() {
   try { localStorage.setItem('ilac_meds', JSON.stringify(meds)); }
-  catch (e) { showBanner('Kaydedilemedi: ' + e.message); }
+  catch (e) { showBanner('Kaydedilemedi: ' + e.message, true); }
 }
 function saveLogs() {
   try { localStorage.setItem('ilac_logs', JSON.stringify(logs)); }
-  catch (e) { showBanner('Kaydedilemedi: ' + e.message); }
+  catch (e) { showBanner('Kaydedilemedi: ' + e.message, true); }
 }
-function showBanner(msg) {
+function showBanner(msg, isError) {
   const b = document.getElementById('banner');
   b.textContent = msg; b.style.display = 'block';
+  b.style.background = isError ? '#FBE9EB' : '#EFEDF7';
+  b.style.color = isError ? '#C85C6B' : '#4A4870';
   setTimeout(() => { b.style.display = 'none'; }, 6000);
 }
 
@@ -246,10 +255,51 @@ function renderForm() {
 document.getElementById('show-form').onclick = () => {
   document.getElementById('form-card').style.display = 'block';
   document.getElementById('show-form').style.display = 'none';
+  document.getElementById('show-import').style.display = 'none';
 };
 document.getElementById('close-form').onclick = () => {
   document.getElementById('form-card').style.display = 'none';
   document.getElementById('show-form').style.display = 'flex';
+  document.getElementById('show-import').style.display = 'flex';
+};
+document.getElementById('show-import').onclick = () => {
+  document.getElementById('import-card').style.display = 'block';
+  document.getElementById('show-form').style.display = 'none';
+  document.getElementById('show-import').style.display = 'none';
+};
+document.getElementById('close-import').onclick = () => {
+  document.getElementById('import-card').style.display = 'none';
+  document.getElementById('show-form').style.display = 'flex';
+  document.getElementById('show-import').style.display = 'flex';
+};
+document.getElementById('import-submit').onclick = () => {
+  const raw = document.getElementById('import-text').value.trim();
+  if (!raw) return;
+  let arr;
+  try { arr = JSON.parse(raw); } catch (e) { showBanner('Geçersiz JSON: ' + e.message, true); return; }
+  if (!Array.isArray(arr)) { showBanner('JSON bir liste ([...]) olmalı.', true); return; }
+  let added = 0;
+  arr.forEach((item, i) => {
+    if (!item || typeof item.name !== 'string' || !item.name.trim()) return;
+    const periods = Array.isArray(item.periods) ? item.periods.filter(p => PERIODS[p]) : [];
+    const days = Array.isArray(item.days) ? item.days.filter(d => WEEKDAYS.includes(d)) : [];
+    if (!periods.length || !days.length) return;
+    meds.push({
+      id: 'm' + Date.now() + '_' + i,
+      name: item.name.trim(),
+      dosage: typeof item.dosage === 'string' ? item.dosage.trim() : '',
+      periods, days,
+    });
+    added++;
+  });
+  if (added === 0) { showBanner('Hiçbir geçerli ilaç bulunamadı, formatı kontrol et.', true); return; }
+  saveMeds();
+  document.getElementById('import-text').value = '';
+  document.getElementById('import-card').style.display = 'none';
+  document.getElementById('show-form').style.display = 'flex';
+  document.getElementById('show-import').style.display = 'flex';
+  showBanner(`${added} ilaç eklendi.`);
+  render();
 };
 document.getElementById('f-name').oninput = renderForm;
 document.querySelectorAll('.quick').forEach(q => {
